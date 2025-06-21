@@ -4,7 +4,7 @@ import subprocess
 #os.environ["WANDB_API_KEY"] = "92cb3d228da9a4adfdee4ccff637982d50556cfd"
 os.environ["WANDB_MODE"] = "offline"
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-
+os.environ["SWANLAB_API_KEY"] = "2Ugz1FxnbIK5eOwarbYAN"
 conda_activate = "source /yinyongjing/anaconda3/etc/profile.d/conda.sh && conda activate smdm"
 
 cmd = """

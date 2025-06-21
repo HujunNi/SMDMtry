@@ -30,6 +30,7 @@ from lit_gpt.speed_monitor import estimate_flops, measure_flops
 from lit_gpt.utils import chunked_cross_entropy, get_default_supported_precision, num_parameters, step_csv_logger, lazy_load
 from lit_gpt.config import Config #added
 from pytorch_lightning.loggers import WandbLogger
+import swanlab
 from flash_attn.losses.cross_entropy import CrossEntropyLoss
 import random
 import argparse
@@ -286,8 +287,9 @@ def setup(
     global out_dir
     hp_name = f'mdm-{args.model}M-{args.flops}'
     out_dir = Path('workdir/scaling_debug') / hp_name
-    wandb_logger = WandbLogger(name=f'{hp_name}-mc', save_dir=out_dir, project='scaling')
-
+    
+    #wandb_logger = WandbLogger(name=f'{hp_name}-mc', save_dir=out_dir, project='scaling')
+    swanlab.init(project='scaling')
     precision = precision or get_default_supported_precision(training=True, tpu=tpu)
 
     if devices > 1:
@@ -306,7 +308,8 @@ def setup(
     else:
         strategy = "auto"
 
-    fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=[logger, wandb_logger])
+    #fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=[logger])
+    fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision)
     fabric.print(hparams)
     #fabric.launch(main, train_data_dir, val_data_dir, resume)
     main(fabric, train_data_dir, val_data_dir, resume)
