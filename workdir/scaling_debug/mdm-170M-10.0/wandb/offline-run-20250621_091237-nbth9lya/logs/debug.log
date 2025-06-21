@@ -1,0 +1,24 @@
+2025-06-21 09:12:37,515 INFO    MainThread:5253 [wandb_setup.py:_flush():76] Current SDK version is 0.15.3
+2025-06-21 09:12:37,516 INFO    MainThread:5253 [wandb_setup.py:_flush():76] Configure stats pid to 5253
+2025-06-21 09:12:37,516 INFO    MainThread:5253 [wandb_setup.py:_flush():76] Loading settings from /root/.config/wandb/settings
+2025-06-21 09:12:37,516 INFO    MainThread:5253 [wandb_setup.py:_flush():76] Loading settings from /yinyongjing/SMDM/wandb/settings
+2025-06-21 09:12:37,516 INFO    MainThread:5253 [wandb_setup.py:_flush():76] Loading settings from environment variables: {'mode': 'offline'}
+2025-06-21 09:12:37,516 INFO    MainThread:5253 [wandb_setup.py:_flush():76] Applying setup settings: {'_disable_service': False}
+2025-06-21 09:12:37,516 INFO    MainThread:5253 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'pretrain/train_mdm.py', 'program': '/yinyongjing/SMDM/pretrain/train_mdm.py'}
+2025-06-21 09:12:37,516 INFO    MainThread:5253 [wandb_init.py:_log_setup():507] Logging user logs to workdir/scaling_debug/mdm-170M-10.0/wandb/offline-run-20250621_091237-nbth9lya/logs/debug.log
+2025-06-21 09:12:37,516 INFO    MainThread:5253 [wandb_init.py:_log_setup():508] Logging internal logs to workdir/scaling_debug/mdm-170M-10.0/wandb/offline-run-20250621_091237-nbth9lya/logs/debug-internal.log
+2025-06-21 09:12:37,517 INFO    MainThread:5253 [wandb_init.py:init():547] calling init triggers
+2025-06-21 09:12:37,517 INFO    MainThread:5253 [wandb_init.py:init():554] wandb.init called with sweep_config: {}
+config: {}
+2025-06-21 09:12:37,517 INFO    MainThread:5253 [wandb_init.py:init():596] starting backend
+2025-06-21 09:12:37,517 INFO    MainThread:5253 [wandb_init.py:init():600] setting up manager
+2025-06-21 09:12:37,524 INFO    MainThread:5253 [backend.py:_multiprocessing_setup():106] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2025-06-21 09:12:37,531 INFO    MainThread:5253 [wandb_init.py:init():606] backend started and connected
+2025-06-21 09:12:37,538 INFO    MainThread:5253 [wandb_init.py:init():700] updated telemetry
+2025-06-21 09:12:37,653 INFO    MainThread:5253 [wandb_init.py:init():787] starting run threads in backend
+2025-06-21 09:13:07,666 INFO    MainThread:5253 [wandb_run.py:_console_start():2158] atexit reg
+2025-06-21 09:13:07,669 INFO    MainThread:5253 [wandb_run.py:_redirect():2013] redirect: SettingsConsole.WRAP_RAW
+2025-06-21 09:13:07,669 INFO    MainThread:5253 [wandb_run.py:_redirect():2078] Wrapping output streams.
+2025-06-21 09:13:07,669 INFO    MainThread:5253 [wandb_run.py:_redirect():2103] Redirects installed.
+2025-06-21 09:13:07,670 INFO    MainThread:5253 [wandb_init.py:init():829] run started, returning control to user process
+2025-06-21 09:13:08,046 WARNING MsgRouterThr:5253 [router.py:message_loop():77] message_loop has been closed

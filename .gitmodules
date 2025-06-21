@@ -1,0 +1,3 @@
+[submodule "TinyLlama"]
+	path = TinyLlama
+	url = https://github.com/jzhang38/TinyLlama.git

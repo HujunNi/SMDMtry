@@ -1,0 +1,82 @@
+2025-06-21 06:57:52,793 INFO    StreamThr :1590 [internal.py:wandb_internal():86] W&B internal server running at pid: 1590, started at: 2025-06-21 06:57:52.791514
+2025-06-21 06:57:52,795 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: status
+2025-06-21 06:57:52,798 INFO    WriterThread:1590 [datastore.py:open_for_write():85] open: workdir/scaling_debug/mdm-170M-10.0/wandb/run-20250621_065752-7d3dm89z/run-7d3dm89z.wandb
+2025-06-21 06:57:52,815 DEBUG   SenderThread:1590 [sender.py:send():375] send: header
+2025-06-21 06:57:52,987 DEBUG   SenderThread:1590 [sender.py:send():375] send: run
+2025-06-21 06:57:52,993 INFO    SenderThread:1590 [sender.py:_maybe_setup_resume():761] checking resume status for None/scaling/7d3dm89z
+2025-06-21 06:57:57,989 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:02,992 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:07,998 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:13,004 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:18,006 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:23,009 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:26,675 INFO    SenderThread:1590 [retry.py:__call__():172] Retry attempt failed:
+Traceback (most recent call last):
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/connection.py", line 174, in _new_conn
+    conn = connection.create_connection(
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/util/connection.py", line 95, in create_connection
+    raise err
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/util/connection.py", line 85, in create_connection
+    sock.connect(sa)
+socket.timeout: timed out
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/connectionpool.py", line 716, in urlopen
+    httplib_response = self._make_request(
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/connectionpool.py", line 404, in _make_request
+    self._validate_conn(conn)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/connectionpool.py", line 1061, in _validate_conn
+    conn.connect()
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/connection.py", line 363, in connect
+    self.sock = conn = self._new_conn()
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/connection.py", line 179, in _new_conn
+    raise ConnectTimeoutError(
+urllib3.exceptions.ConnectTimeoutError: (<urllib3.connection.HTTPSConnection object at 0x7f5fb108f280>, 'Connection to api.wandb.ai timed out. (connect timeout=10)')
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/requests/adapters.py", line 667, in send
+    resp = conn.urlopen(
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/connectionpool.py", line 802, in urlopen
+    retries = retries.increment(
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/urllib3/util/retry.py", line 594, in increment
+    raise MaxRetryError(_pool, url, error or ResponseError(cause))
+urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='api.wandb.ai', port=443): Max retries exceeded with url: /graphql (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f5fb108f280>, 'Connection to api.wandb.ai timed out. (connect timeout=10)'))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/sdk/lib/retry.py", line 131, in __call__
+    result = self._call_fn(*args, **kwargs)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/sdk/internal/internal_api.py", line 285, in execute
+    return self.client.execute(*args, **kwargs)  # type: ignore
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/vendor/gql-0.2.0/wandb_gql/client.py", line 52, in execute
+    result = self._get_result(document, *args, **kwargs)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/vendor/gql-0.2.0/wandb_gql/client.py", line 60, in _get_result
+    return self.transport.execute(document, *args, **kwargs)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/sdk/lib/gql_request.py", line 55, in execute
+    request = self.session.post(self.url, **post_args)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/requests/sessions.py", line 637, in post
+    return self.request("POST", url, data=data, json=json, **kwargs)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/requests/sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/requests/sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/requests/adapters.py", line 688, in send
+    raise ConnectTimeout(e, request=request)
+requests.exceptions.ConnectTimeout: HTTPSConnectionPool(host='api.wandb.ai', port=443): Max retries exceeded with url: /graphql (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x7f5fb108f280>, 'Connection to api.wandb.ai timed out. (connect timeout=10)'))
+2025-06-21 06:58:28,011 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:33,015 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:38,021 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:43,026 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:48,028 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: keepalive
+2025-06-21 06:58:53,032 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: cancel
+2025-06-21 06:58:53,033 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: cancel
+2025-06-21 06:58:53,700 DEBUG   HandlerThread:1590 [handler.py:handle_request():144] handle_request: shutdown
+2025-06-21 06:58:53,700 INFO    HandlerThread:1590 [handler.py:finish():842] shutting down handler
+2025-06-21 06:58:54,033 INFO    WriterThread:1590 [datastore.py:close():298] close: workdir/scaling_debug/mdm-170M-10.0/wandb/run-20250621_065752-7d3dm89z/run-7d3dm89z.wandb
+2025-06-21 06:59:01,101 DEBUG   SenderThread:1590 [sender.py:send():384] Record cancelled: run
+2025-06-21 06:59:01,102 INFO    SenderThread:1590 [sender.py:finish():1550] shutting down sender

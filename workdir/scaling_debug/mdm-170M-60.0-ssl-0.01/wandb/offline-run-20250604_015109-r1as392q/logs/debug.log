@@ -1,0 +1,36 @@
+2025-06-04 01:51:09,939 INFO    MainThread:4314 [wandb_setup.py:_flush():76] Current SDK version is 0.15.3
+2025-06-04 01:51:09,940 INFO    MainThread:4314 [wandb_setup.py:_flush():76] Configure stats pid to 4314
+2025-06-04 01:51:09,940 INFO    MainThread:4314 [wandb_setup.py:_flush():76] Loading settings from /root/.config/wandb/settings
+2025-06-04 01:51:09,940 INFO    MainThread:4314 [wandb_setup.py:_flush():76] Loading settings from /yinyongjing/SMDM/wandb/settings
+2025-06-04 01:51:09,940 INFO    MainThread:4314 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2025-06-04 01:51:09,940 INFO    MainThread:4314 [wandb_setup.py:_flush():76] Applying setup settings: {'_disable_service': False}
+2025-06-04 01:51:09,940 INFO    MainThread:4314 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'pretrain/train_mdm_rl.py', 'program': '/yinyongjing/SMDM/pretrain/train_mdm_rl.py'}
+2025-06-04 01:51:09,940 INFO    MainThread:4314 [wandb_setup.py:_flush():76] Applying login settings: {'mode': 'offline'}
+2025-06-04 01:51:09,941 INFO    MainThread:4314 [wandb_init.py:_log_setup():507] Logging user logs to workdir/scaling_debug/mdm-170M-60.0-ssl-0.01/wandb/offline-run-20250604_015109-r1as392q/logs/debug.log
+2025-06-04 01:51:09,941 INFO    MainThread:4314 [wandb_init.py:_log_setup():508] Logging internal logs to workdir/scaling_debug/mdm-170M-60.0-ssl-0.01/wandb/offline-run-20250604_015109-r1as392q/logs/debug-internal.log
+2025-06-04 01:51:09,941 INFO    MainThread:4314 [wandb_init.py:init():547] calling init triggers
+2025-06-04 01:51:09,942 INFO    MainThread:4314 [wandb_init.py:init():554] wandb.init called with sweep_config: {}
+config: {}
+2025-06-04 01:51:09,942 INFO    MainThread:4314 [wandb_init.py:init():596] starting backend
+2025-06-04 01:51:09,942 INFO    MainThread:4314 [wandb_init.py:init():600] setting up manager
+2025-06-04 01:51:09,949 INFO    MainThread:4314 [backend.py:_multiprocessing_setup():106] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2025-06-04 01:51:09,958 INFO    MainThread:4314 [wandb_init.py:init():606] backend started and connected
+2025-06-04 01:51:09,967 INFO    MainThread:4314 [wandb_init.py:init():700] updated telemetry
+2025-06-04 01:51:10,140 INFO    MainThread:4314 [wandb_init.py:init():787] starting run threads in backend
+2025-06-04 01:51:16,033 WARNING MainThread:4314 [wandb_init.py:init():1172] interrupted
+Traceback (most recent call last):
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/sdk/wandb_init.py", line 1150, in init
+    run = wi.init()
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/sdk/wandb_init.py", line 799, in init
+    run_start_result = run_start_handle.wait(timeout=30)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/sdk/lib/mailbox.py", line 283, in wait
+    found, abandoned = self._slot._get_and_clear(timeout=wait_timeout)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/sdk/lib/mailbox.py", line 130, in _get_and_clear
+    if self._wait(timeout=timeout):
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/site-packages/wandb/sdk/lib/mailbox.py", line 126, in _wait
+    return self._event.wait(timeout=timeout)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/threading.py", line 581, in wait
+    signaled = self._cond.wait(timeout)
+  File "/yinyongjing/anaconda3/envs/smdm/lib/python3.9/threading.py", line 316, in wait
+    gotit = waiter.acquire(True, timeout)
+KeyboardInterrupt
