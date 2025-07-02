@@ -1,6 +1,5 @@
-#========== added for flexattetion 
-import torch._dynamo #added
-torch._dynamo.config.suppress_errors = True #added
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
 import os  #added
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com" #added
 import glob
@@ -9,14 +8,17 @@ import sys
 import time
 from pathlib import Path
 from typing import Optional, Tuple, Union
+import math
 import re  #added
+import sys 
+from pathlib import Path
 import lightning as L
 import torch
 import torch.nn as nn  #added
 from lightning.fabric.strategies import FSDPStrategy, XLAStrategy
 from torch.utils.data import DataLoader
 from functools import partial
-from transformers import GPT2LMHeadModel, GPT2TokenizerFast #added
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
@@ -26,15 +28,17 @@ from lit_gpt.packed_dataset import CombinedDataset, PackedDataset
 from lit_gpt.speed_monitor import SpeedMonitorFabric as Monitor
 from lit_gpt.speed_monitor import estimate_flops, measure_flops
 from lit_gpt.utils import chunked_cross_entropy, get_default_supported_precision, num_parameters, step_csv_logger, lazy_load
+from lit_gpt.config import Config #added
 from pytorch_lightning.loggers import WandbLogger
-import swanlab #added
+import swanlab
 from flash_attn.losses.cross_entropy import CrossEntropyLoss
 import random
-import argparse 
+import argparse
 import torch.nn.functional as F  #added
 from pretrain.semantic_loss import SemanticLossWrapper #added
 from transformers import AutoModelForMaskedLM, AutoTokenizer,PreTrainedModel #added
 from huggingface_hub import hf_hub_download, snapshot_download #added
+from torch.distributed.fsdp import FullyShardedDataParallel
 
 # ================ add latent_token ==================
 def add_latent_tokens(tokenizer, latent_size: int = 64):
@@ -47,39 +51,62 @@ def add_latent_tokens(tokenizer, latent_size: int = 64):
 
 #================== added : load pretrained model ========================
 def load_pretrained_m_model(
-    model_m_ckpt: str = "ar-2121M-100e18.pth",
+    model_m_name: str = "ModernBERT",
+    mdm_ckpt: str = "mdm-113M-10e18.pth",
+    ar_ckpt: str = "ar-113M-10e18.pth",
 )-> nn.Module:
-    subdir = model_m_ckpt.split("-", 1)[0]
-    if subdir not in ("mdm", "ar"):
-        raise ValueError(f"Unknown checkpoint prefix '{subdir}'; expected 'mdm' or 'ar'")
-   
-    ckpt_path = hf_hub_download(
-        repo_id="nieshen/SMDM",
-        subfolder=subdir,
-        filename=model_m_ckpt,
-        repo_type="model",
-    )
-    data = torch.load(ckpt_path, map_location="cpu")
-    if isinstance(data, dict):
-        sd = data.get("model", data.get("state_dict", data))
+    """
+    Load a pretrained ModernBERT encoder from Hugging Face.
+    Returns a model that outputs last_hidden_state of shape [B, L, D].
+    """
+    if model_m_name == "ModernBERT":
+        model = AutoModelForMaskedLM.from_pretrained("answerdotai/ModernBERT-base",torch_dtype=torch.float16,device_map=None,attn_implementation="sdpa")
+        tokenizer_m = AutoTokenizer.from_pretrained(
+            "answerdotai/ModernBERT-base",
+            use_fast=True,
+            local_files_only=False,
+        )
+        model.config.mask_token_id = tokenizer_m.mask_token_id
+
+    elif model_m_name in ("mdm", "ar"):
+        #repo_dir = snapshot_download(repo_id="nieshen/SMDM")
+        subdir = "mdm" if model_m_name == "mdm" else "ar"
+        filename = mdm_ckpt if model_m_name == "mdm" else ar_ckpt
+        #ckpt_path = os.path.join(repo_dir, subdir, filename)
+        ckpt_path = hf_hub_download(
+            repo_id="nieshen/SMDM",
+            subfolder=subdir,
+            filename=filename,
+            repo_type="model"       
+        )
+        data = torch.load(ckpt_path, map_location="cpu")
+        if isinstance(data, dict):
+            if "model" in data:
+                sd = data["model"]
+            elif "state_dict" in data:
+                sd = data["state_dict"]
+            else:
+                sd = data  
+        else:
+            sd = data
+
+        ckpt_rows, emb_dim = sd["transformer.wte.weight"].shape    
+        m = re.search(r"-(\d+)M", filename)
+        size = m.group(1)
+        
+        sd = { k: v for k, v in sd.items() if not k.startswith("lm_head") }
+        config = Config.from_name(f"Diff_LLaMA_{size}M")
+        config.padded_vocab_size = ckpt_rows - 1
+        config.vocab_size = ckpt_rows - 1
+
+        model = TransEncoder(config)
+        model.load_state_dict(sd,strict=False)
+        del data
+    
     else:
-        sd = data
-
-    sd = {k: v for k, v in sd.items() if not k.startswith("lm_head")}
-
-    ckpt_rows, _ = sd["transformer.wte.weight"].shape
-    m = re.search(r"-(\d+)M", model_m_ckpt)
-    if not m:
-        raise ValueError(f"Cannot parse model size from '{model_m_ckpt}'")
-    size = m.group(1)
-
-    config = Config.from_name(f"Diff_LLaMA_{size}M")
-    config.padded_vocab_size = ckpt_rows - 1
-    config.vocab_size        = ckpt_rows - 1
-    config.use_latent = False
-
-    model = TransEncoder(config)
-    model.load_state_dict(sd, strict=False)
+        raise ValueError(f"Unknown model_m_name {model_m_name!r}")
+    
+    #model = model.to("cuda")
     model.eval()
     return model
 #========================== end =======================================
@@ -98,14 +125,23 @@ def extract_semantic_Y(
     Returns:
         [B, K, D]
     """
-     _, hidden = model_m(input_ids, return_hidden=True)
+    if isinstance(model_m, TransEncoder):
+        _, hidden = model_m(input_ids, return_hidden=True)
+    elif isinstance(model_m, PreTrainedModel):
+        out = model_m(
+            input_ids=input_ids,
+            return_dict=True,
+            output_hidden_states=True,
+        )
+        hidden = out.hidden_states[-1]
+    else:
+        raise ValueError(f"doesnt support model_m: {type(model_m)}")
+
     B, L, D = hidden.shape
 
     if method == "meanK":
         chunk = L // K
-        trimmed_len = chunk * K
-        hidden_trim = hidden[:, :trimmed_len, :]
-        Y = hidden_trim.view(B, K, chunk, D).mean(dim=2)  # [B, K, D]
+        Y = hidden.view(B, K, chunk, D).mean(dim=2)  # [B, K, D]
 
     elif method == "maskK":
         step = L // K
@@ -116,8 +152,18 @@ def extract_semantic_Y(
         if mask_tok is None:
             raise ValueError("model doesn’t support maskK: no mask_token_id set on model_m.config")
         masked[:, positions] = mask_tok
-        _, hidden = model_m(masked, return_hidden=True)
-        Y = hidden[:, positions, :]  # [B, K, D]
+
+        if isinstance(model_m, TransEncoder):
+            _, hidden2 = model_m(masked, return_hidden=True)
+        else:  # PreTrainedModel
+            out2 = model_m(
+                input_ids=masked,
+                return_dict=True,
+                output_hidden_states=True,
+            )
+            hidden2 = out2.hidden_states[-1]
+
+        Y = hidden2[:, positions, :]  # [B, K, D]
 
     else:
         raise ValueError(f"Unknown extract_method: {method}")
@@ -146,7 +192,9 @@ def parse_args():
     #========================== added: extracting Y ways ==========================
     parse.add_argument("--extract_method", type=str, choices=["meanK", "maskK"], help="How to extract K semantic vectors from each block (meanK or maskK)")
     #========================== added: choose which frozen model ==========================
-    parse.add_argument("--model_m_ckpt",type=str,default="ar-2121M-100e18.pth",help="Checkpoint filename in nieshen/SMDM repo, e.g. 'mdm-113M-10e18.pth' or 'ar-2121M-100e18.pth'")
+    parse.add_argument("--model_m_name", type=str, choices=["ModernBERT", "mdm", "ar"], help="Which pretrained model M to use for semantic extraction")
+    parse.add_argument("--mdm_ckpt", type=str, default="mdm-113M-10e18.pth",help="Filename under mdm/ in nieshen/SMDM repo")
+    parse.add_argument("--ar_ckpt", type=str, default="ar-2121M-100e18.pth",help="Filename under ar/ in nieshen/SMDM repo")
     #========================== added: diffusion loss modification ==========================
     parse.add_argument('--include_unmasked_loss', action='store_true', help='Whether to also compute CE loss on unmasked positions')
     parse.add_argument('--unmask_weight', type = float, default = 0.0,  help='weight to unmasked token loss, from 0.0 ~ 1.0')
@@ -168,7 +216,7 @@ model_para_config = {
 }
 
 # Hyperparameters
-num_of_devices = 8
+num_of_devices = 1
 global_batch_size = int(args.batch_size / args.nodes_num)
 learning_rate = 2e-4
 #if args.model <= 20:
@@ -220,6 +268,10 @@ hparams = {k: v for k, v in locals().items() if isinstance(v, (int, float, str))
 logger = step_csv_logger("out", model_name, flush_logs_every_n_steps=log_iter_interval)
 
 
+
+
+
+
 def forward_process(batch, total_dim=32000, eps=1e-3):
     b, l = batch.shape
     t = torch.rand((b,), device=batch.device)
@@ -233,28 +285,18 @@ def forward_process(batch, total_dim=32000, eps=1e-3):
 
 
 def setup(
-    devices: int = 8,
-    train_data_dir: Path = Path("/ssdwork/yinyongjing/slimpajama62b_prepared/train"),    val_data_dir: Path = Path("/ssdwork/yinyongjing/slimpajama62b_prepared/validation"),
+    devices: int = 1,
+    train_data_dir: Path = Path("/ssdwork/yinyongjing/slimpajama62b_prepared/train"),
+    val_data_dir: Path = Path("/ssdwork/yinyongjing/slimpajama62b_prepared/validation"),
     precision: Optional[str] = None,
     tpu: bool = False,
     resume: Union[bool, Path] = True,
 ) -> None:
     global out_dir
-    #added : rename 
-    parts = [f"mdm-{args.model}M",f"flops{args.flops}",f"mbs{args.micro_batch_size}",]
-    if args.use_latent_token:
-        parts.append("latent")
-    if args.zloss_weight and args.zloss_weight > 0:
-        parts += [
-            f"zlK{args.zloss_K}",
-            args.extract_method,
-            f"{args.zloss_type}{args.zloss_weight}",
-        ]
-    if args.include_unmasked_loss:
-        parts.append(f"unmask{args.unmask_weight}")
-    if args.experiment_name:
-        parts.append(args.experiment_name)
-    hp_name = "-".join(parts)
+    hp_name = (
+    f"mdm-{args.model}M-{args.flops}"
+    + f"-mbs{args.micro_batch_size}"
+    + (f"-unmask{args.unmask_weight}" if args.include_unmasked_loss else ""))
     out_dir = Path('workdir/scaling_debug') / hp_name
     
     #wandb_logger = WandbLogger(name=f'{hp_name}-mc', save_dir=out_dir, project='scaling')
@@ -278,7 +320,8 @@ def setup(
     else:
         strategy = "auto"
 
-    fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=[logger])
+    #fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=[logger])
+    fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision)
     fabric.print(hparams)
     #fabric.launch(main, train_data_dir, val_data_dir, resume)
     main(fabric, train_data_dir, val_data_dir, resume)
@@ -288,27 +331,35 @@ def main(fabric, train_data_dir, val_data_dir, resume):
     monitor = Monitor(fabric, window_size=2, time_unit="seconds", log_iter_interval=log_iter_interval)
     
     config = Config.from_name(model_name)
-    config.use_latent = args.use_latent_token
     config.padded_vocab_size = 32000
     #==========================added: initialize tokenizer with latent tokens#==========================
-    if args.use_latent_token:
+    if hasattr(config, "use_latent_token") and config.use_latent_token:
         tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
         latent_token_ids = add_latent_tokens(tokenizer, config.latent_size)
-        tokenizer.add_special_tokens({"mask_token": "[MASK]"})
         config.vocab_size = len(tokenizer)
         config.padded_vocab_size = len(tokenizer)
+        model = GPT2LMHeadModel.from_pretrained("gpt2")
+        tokenizer.add_special_tokens({"mask_token": "[MASK]"})
+        model.resize_token_embeddings(len(tokenizer))
+        #print("mask_token_id:", tokenizer.mask_token_id)
     else:
         tokenizer = None
         latent_token_ids = None
    # #========================== end #==========================
 
     # ========================== initialze model m ==========================
-    if args.use_latent_token and args.zloss_weight > 0 and args.zloss_type != "none":
-        model_m = load_pretrained_m_model(args.model_m_ckpt).to(fabric.device)
+    if args.zloss_weight > 0 and args.zloss_type != "none":
+        model_m = load_pretrained_m_model(
+            model_m_name=args.model_m_name,
+            mdm_ckpt=args.mdm_ckpt,
+            ar_ckpt=args.ar_ckpt,
+        )
+        model_m = model_m.to(fabric.device)
+        model_m.config.mask_token_id = tokenizer.mask_token_id
+
         for p in model_m.parameters():
             p.requires_grad_(False)
         model_m.eval()
-        model_m.config.mask_token_id = tokenizer.mask_token_id
     else:
         model_m = None
     # ========================== end ==========================
@@ -332,6 +383,7 @@ def main(fabric, train_data_dir, val_data_dir, resume):
     if fabric.global_rank == 0:
         out_dir.mkdir(parents=True, exist_ok=True)
 
+    fabric.print("Creating dataloader...") #added
     train_dataloader, val_dataloader = create_dataloaders(
         batch_size=args.micro_batch_size,
         block_size=config.block_size,
@@ -343,6 +395,7 @@ def main(fabric, train_data_dir, val_data_dir, resume):
         latent_size=config.latent_size, #added attributes
         use_latent_tokens=args.use_latent_token, #added attributes
     )
+    fabric.print("Dataloader created")
 
     if val_dataloader is None:
         train_dataloader = fabric.setup_dataloaders(train_dataloader)
@@ -364,6 +417,7 @@ def main(fabric, train_data_dir, val_data_dir, resume):
         resume_ckpt = Path(args.arm_ckpt_dir) / "step-002000-ckpt.pth"
         ckpt = torch.load(resume_ckpt, map_location="cpu")
         sd = ckpt.get("model", ckpt.get("state_dict", ckpt))
+        sd_optim = ckpt.get("optimizer", None)
         step     = ckpt.get("step_count", 0)
         iter_num = ckpt.get("iter_num", 0)
         
@@ -391,6 +445,7 @@ def main(fabric, train_data_dir, val_data_dir, resume):
     else:
         step = 0
         iter_num = 0 
+        sd_optim = None
 
     model = fabric.setup(model)
     optimizer = torch.optim.AdamW(
@@ -431,7 +486,6 @@ def train(fabric, state, train_dataloader, val_dataloader, monitor, resume, mode
         latent_size = len(latent_token_ids)  #added
     else:
         latent_size = 0
-
     K = args.zloss_K #added
 
     # if val_dataloader is not None:
@@ -491,7 +545,7 @@ def train(fabric, state, train_dataloader, val_dataloader, monitor, resume, mode
             noisy_input, mask_indices, p_mask = forward_process(full_input)
         # >>>> MODIFIED END
         else:
-            input_ids = train_data[:, 0 : model.config.block_size].contiguous()
+            input_ids = train_data[:, : model.config.block_size].contiguous()
             noisy_input, mask_indices, p_mask = forward_process(input_ids)
 
         is_accumulating = (state["iter_num"] + 1) % gradient_accumulation_steps != 0
@@ -505,13 +559,22 @@ def train(fabric, state, train_dataloader, val_dataloader, monitor, resume, mode
                 ce_values = loss_func(logits_real[mask_real],real_block[mask_real]) / p_mask_real[mask_real] 
                 masked_loss = ce_values.sum() / (train_data.size(0) * model.config.block_size)
 
+                if args.include_unmasked_loss:
+                    inv_real = ~mask_real
+                    ce_inv = loss_func(logits_real[inv_real],real_block[inv_real]) / p_mask_real[inv_real]
+                    unmasked_loss = ce_inv.sum() / (train_data.size(0) * model.config.block_size)
+                    w = args.unmask_weight
+                    ce_loss = (1 - w) * masked_loss + w * unmasked_loss
+                else:
+                    ce_loss = masked_loss
+
                 if args.zloss_weight > 0 and args.zloss_type != "none" and model_m is not None:
                     Y = extract_semantic_Y(real_block,model_m,method=args.extract_method,K=K)
                     z_pred = hiddens[:, :K, :]              
                     z_loss = zloss_fn(Y, z_pred)
-                    loss = masked_loss + args.zloss_weight * z_loss
+                    loss = ce_loss + args.zloss_weight * z_loss
                 else:
-                    loss = masked_loss
+                    loss = ce_loss
             # >>>> MODIFIED end
 
             else: #original branch
@@ -540,7 +603,7 @@ def train(fabric, state, train_dataloader, val_dataloader, monitor, resume, mode
         if args.use_latent_token:
             total_lengths += real_block.size(1)
         else:
-            total_lengths += input_ids.size(1)
+            total_lengths += model.config.block_size 
         t1 = time.perf_counter()
         fabric.print(
                 f"iter {state['iter_num']} step {state['step_count']}: loss {loss.item():.4f}, iter time:"
@@ -569,7 +632,7 @@ def train(fabric, state, train_dataloader, val_dataloader, monitor, resume, mode
         if val_dataloader is not None and not is_accumulating and (state["step_count"] % eval_step_interval == 0 or state["step_count"] == max_step):
             
             t0 = time.perf_counter()
-            val_loss = validate(fabric, model, val_dataloader) #added attributes
+            val_loss = validate(fabric, model, val_dataloader, model_m, zloss_fn, latent_token_ids) #added attributes
             t1 = time.perf_counter() - t0
             monitor.eval_end(t1)
             fabric.print(f"step {state['iter_num']}: val loss {val_loss:.4f}, val time: {t1 * 1000:.2f}ms")
@@ -616,6 +679,7 @@ def create_dataloader(
     data_config = train_data_config if split == "train" else val_data_config
     for prefix, _ in data_config:
         filenames = sorted(glob.glob(str(data_dir / f"{prefix}*")))
+        print(f"[DEBUG] split={split!r}  prefix={prefix!r}  found files:", filenames[:3], "… total", len(filenames))
         random.seed(seed)
         random.shuffle(filenames)
 

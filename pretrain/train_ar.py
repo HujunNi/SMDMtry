@@ -23,13 +23,16 @@ from pytorch_lightning.loggers import WandbLogger
 from lit_gpt import FusedCrossEntropyLoss
 import random
 import argparse
-
+import swanlab
 
 def parse_args():
     parse = argparse.ArgumentParser()
     parse.add_argument('--model', type=int, help='model parameters')
     parse.add_argument('--nodes_num', type=int, default=1, help='number of nodes')
     parse.add_argument('--flops', type=float, help='FLOPs, *e18')
+    parse.add_argument('--ar_steps',type=int, default=2000, help= 'run how many steps of Ar before shift to MDM') #added
+    parse.add_argument("--micro_batch_size", type=int,help="choose micro batch size to maximize GPU utilization") #added
+    parse.add_argument("--experiment_name", type=str, default=None, help="Experiment name for SwanLab")
     args = parse.parse_args()
     return args
 
@@ -50,21 +53,21 @@ model_para_config = {
 num_of_devices = 8
 global_batch_size = int(256 / args.nodes_num)
 learning_rate = 2e-4
-if args.model <= 20:
-    micro_batch_size = 32
-elif args.model <= 50:
-    micro_batch_size = 16
-elif args.model <= 1028:
-    micro_batch_size = 8
-elif args.model <= 2000:
-    micro_batch_size = 4
-else:
-    micro_batch_size = 2
+#if args.model <= 20:
+#    micro_batch_size = 32
+#elif args.model <= 50:
+#    micro_batch_size = 16
+#elif args.model <= 1028:
+#    micro_batch_size = 8
+#elif args.model <= 2000:
+#    micro_batch_size = 4
+#else:
+#    micro_batch_size = 2
 max_step = int(args.flops * 1e12 / (6 * model_para_config[f'{args.model}'] * global_batch_size * 2048) / args.nodes_num)
 warmup_steps = int(max_step / 100) if int(max_step / 100) > 100 else 100
 log_step_interval = 10
 eval_iters = int(100 * 1024 / global_batch_size)
-save_step_interval = 5000
+save_step_interval = args.ar_steps
 eval_step_interval = 999999999999 #inf
 
 
@@ -76,7 +79,7 @@ decay_lr = True
 min_lr = 2e-5
 
 batch_size = global_batch_size // num_of_devices
-gradient_accumulation_steps = batch_size // micro_batch_size
+gradient_accumulation_steps = batch_size // args.micro_batch_size
 assert gradient_accumulation_steps > 0
 warmup_iters = warmup_steps * gradient_accumulation_steps
 
@@ -91,7 +94,6 @@ log_iter_interval = log_step_interval * gradient_accumulation_steps
 # Treat all dataset equally by their size. If you want to use a different weight for a dataset, add it to the list with the weight.
 train_data_config = [
     ("train_slim", 1.),
-    ("train_star", 0.),
 ]
 
 val_data_config = [
@@ -104,8 +106,8 @@ logger = step_csv_logger("out", model_name, flush_logs_every_n_steps=log_iter_in
 
 def setup(
     devices: int = 8,
-    train_data_dir: Path = Path("/dataset/slim_star_combined"),
-    val_data_dir: Path = Path("/dataset/slim_star_combined"),
+    train_data_dir: Path = Path("/ssdwork/yinyongjing/slimpajama62b_prepared/train"),
+    val_data_dir: Path = Path("/ssdwork/yinyongjing/slimpajama62b_prepared/validation"),
     precision: Optional[str] = None,
     tpu: bool = False,
     resume: Union[bool, Path] = True,
@@ -113,7 +115,8 @@ def setup(
     global out_dir
     hp_name = f'arm-{args.model}M-{args.flops}'
     out_dir = Path('workdir/scaling_debug') / hp_name
-    wandb_logger = WandbLogger(name=hp_name, save_dir=out_dir, project='scaling')
+    #wandb_logger = WandbLogger(name=hp_name, save_dir=out_dir, project='scaling')
+    swanlab.init(project='SMDM', experiment_name=args.experiment_name)
 
     precision = precision or get_default_supported_precision(training=True, tpu=tpu)
 
@@ -133,7 +136,7 @@ def setup(
     else:
         strategy = "auto"
 
-    fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=[logger, wandb_logger])
+    fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision)
     fabric.print(hparams)
     #fabric.launch(main, train_data_dir, val_data_dir, resume)
     main(fabric, train_data_dir, val_data_dir, resume)
@@ -148,12 +151,16 @@ def main(fabric, train_data_dir, val_data_dir, resume):
     config = Config.from_name(model_name)
 
     train_dataloader, val_dataloader = create_dataloaders(
-        batch_size=micro_batch_size,
+        batch_size=args.micro_batch_size,
         block_size=config.block_size,
         fabric=fabric,
         train_data_dir=train_data_dir,
         val_data_dir=val_data_dir,
         seed=3407,
+        tokenizer=None,  #added attributes
+        latent_size=0, #added attributes
+        use_latent_tokens=False, #added attributes
+        latent_insert_interval=0, #added
     )
     if val_dataloader is None:
         train_dataloader = fabric.setup_dataloaders(train_dataloader)
@@ -213,9 +220,9 @@ def train(fabric, state, train_dataloader, val_dataloader, monitor, resume):
         # "estimated" is not as precise as "measured". Estimated is optimistic but widely used in the wild.
         # When comparing MFU or FLOP numbers with other projects that use estimated FLOPs,
         # consider passing `SpeedMonitor(flops_per_batch=estimated_flops)` instead
-        estimated_flops = estimate_flops(meta_model) * micro_batch_size
+        estimated_flops = estimate_flops(meta_model) * args.micro_batch_size
         fabric.print(f"Estimated TFLOPs: {estimated_flops * fabric.world_size / 1e12:.2f}")
-        x = torch.randint(0, 1, (micro_batch_size, model.config.block_size))
+        x = torch.randint(0, 1, (args.micro_batch_size, model.config.block_size))
         # measured_flos run in meta. Will trigger fusedRMSNorm error
         #measured_flops = measure_flops(meta_model, x)
         #fabric.print(f"Measured TFLOPs: {measured_flops * fabric.world_size / 1e12:.2f}")
@@ -246,6 +253,9 @@ def train(fabric, state, train_dataloader, val_dataloader, monitor, resume):
                 fabric.barrier()
                 fabric.print("resume finished, taken {} seconds".format(time.perf_counter() - total_t0))
         if state["iter_num"] >= max_iters:
+            break
+
+        if state["step_count"] >= args.ar_steps:
             break
         
         # determine and set the learning rate for this iteration
@@ -282,9 +292,11 @@ def train(fabric, state, train_dataloader, val_dataloader, monitor, resume):
                 # print days as well
                 f" or {(t1 - total_t0) / (state['iter_num'] - initial_iter) * (max_iters - state['iter_num']) / 3600 / 24:.2f} days. "
             )
- 
+        
+        swanlab.log({"loss": loss.item()}, step=state["step_count"])
+
         monitor.on_train_batch_end(
-            state["iter_num"] * micro_batch_size,
+            state["iter_num"] * args.micro_batch_size,
             t1 - total_t0,
             # this assumes that device FLOPs are the same and that all devices have the same batch size
             fabric.world_size,
@@ -304,15 +316,15 @@ def train(fabric, state, train_dataloader, val_dataloader, monitor, resume):
             t1 = time.perf_counter() - t0
             monitor.eval_end(t1)
             fabric.print(f"step {state['iter_num']}: val loss {val_loss:.4f}, val time: {t1 * 1000:.2f}ms")
-            fabric.log_dict({"metric/val_loss": val_loss.item(), "total_tokens": model.config.block_size * (state["iter_num"] + 1) * micro_batch_size * fabric.world_size}, state["step_count"])
-            fabric.log_dict({"metric/val_ppl": math.exp(val_loss.item()), "total_tokens": model.config.block_size * (state["iter_num"] + 1) * micro_batch_size * fabric.world_size}, state["step_count"])
+            fabric.log_dict({"metric/val_loss": val_loss.item(), "total_tokens": model.config.block_size * (state["iter_num"] + 1) * args.micro_batch_size * fabric.world_size}, state["step_count"])
+            fabric.log_dict({"metric/val_ppl": math.exp(val_loss.item()), "total_tokens": model.config.block_size * (state["iter_num"] + 1) * args.micro_batch_size * fabric.world_size}, state["step_count"])
             fabric.barrier()
         if not is_accumulating and (state["step_count"] % save_step_interval == 0 or state["step_count"] == max_step):
-            checkpoint_path = out_dir / f"iter-{state['iter_num']:06d}-ckpt.pth"
+            checkpoint_path = out_dir / f"step-{state['step_count']:06d}-ckpt.pth"
             fabric.print(f"Saving checkpoint to {str(checkpoint_path)!r}")
             fabric.save(checkpoint_path, state)
 
-        
+         
 @torch.no_grad()
 def validate(fabric: L.Fabric, model: torch.nn.Module, val_dataloader: DataLoader) -> torch.Tensor:
     fabric.print("Validating ...")
@@ -337,9 +349,8 @@ def validate(fabric: L.Fabric, model: torch.nn.Module, val_dataloader: DataLoade
     model.train()
     return out
 
-
 def create_dataloader(
-    batch_size: int, block_size: int, data_dir: Path, fabric, shuffle: bool = True, seed: int = 12345, split="train"
+    batch_size: int, block_size: int, data_dir: Path, fabric, shuffle: bool = True, seed: int = 12345, split="train",tokenizer = None, latent_size: int = 64, use_latent_tokens: bool = False, latent_insert_interval: Optional[int] = None,
 ) -> DataLoader:
     datasets = []
     data_config = train_data_config if split == "train" else val_data_config
@@ -353,12 +364,16 @@ def create_dataloader(
             # n_chunks control the buffer size. 
             # Note that the buffer size also impacts the random shuffle
             # (PackedDataset is an IterableDataset. So the shuffle is done by prefetch a buffer and shuffle the buffer)
-            n_chunks=8,
+            n_chunks=8 if split == "train" else 1,
             block_size=block_size,
             shuffle=shuffle,
             seed=seed+fabric.global_rank,
             num_processes=fabric.world_size,
             process_rank=fabric.global_rank,
+            tokenizer=tokenizer,  #added
+            latent_size=latent_size, #added
+            use_latent_tokens=use_latent_tokens, #added
+            latent_insert_interval=latent_insert_interval #added 
         )
         datasets.append(dataset)
 
@@ -383,33 +398,44 @@ def create_dataloaders(
     train_data_dir: Path = Path("data/redpajama_sample"),
     val_data_dir: Optional[Path] = None,
     seed: int = 12345,
+    tokenizer=None,  #added
+    latent_size: int = 64,#added
+    use_latent_tokens: bool = False, #added
+    latent_insert_interval: Optional[int] = None, #added
 ) -> Tuple[DataLoader, DataLoader]:
     # Increase by one because we need the next word as well
-    effective_block_size = block_size + 1
+    orig_bs = block_size + 1 
     train_dataloader = create_dataloader(
         batch_size=batch_size,
-        block_size=effective_block_size,
+        block_size=orig_bs,
         fabric=fabric,
         data_dir=train_data_dir,
         shuffle=True,
         seed=seed,
-        split="train"
+        split="train",
+        tokenizer=tokenizer,  #added
+        latent_size=latent_size,  #added
+        use_latent_tokens=use_latent_tokens, #added
+        latent_insert_interval=latent_insert_interval, #added
     )
     val_dataloader = (
         create_dataloader(
             batch_size=batch_size,
-            block_size=effective_block_size,
+            block_size=orig_bs,
             fabric=fabric,
             data_dir=val_data_dir,
             shuffle=False,
             seed=seed,
-            split="validation"
+            split="validation",
+            tokenizer=tokenizer,  #added
+            latent_size=latent_size,  #added
+            use_latent_tokens=use_latent_tokens, #added
+            latent_insert_interval=latent_insert_interval, #added
         )
         if val_data_dir
         else None
     )
     return train_dataloader, val_dataloader
-
 
 # learning rate decay scheduler (cosine with warmup)
 def get_lr(it):
@@ -431,3 +457,4 @@ if __name__ == "__main__":
     # torch.backends.cuda.enable_flash_sdp(False)
     torch.set_float32_matmul_precision("high")
     setup()
+

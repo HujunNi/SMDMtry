@@ -8,6 +8,7 @@ import struct
 import numpy as np
 import torch
 from torch.utils.data import IterableDataset, get_worker_info
+from typing import Optional
 
 dtypes = {
     1: np.uint8,
@@ -37,26 +38,27 @@ class PackedDataset(IterableDataset):
         self,
         filenames,
         n_chunks,
-        orig_block_size,
+        block_size,
         seed=12345,
         shuffle=True,
         wrap=False,
         num_processes=1,
         process_rank=0,
         tokenizer=None,              # added
-        latent_size=64,              # added
+        latent_insert_interval: Optional[int] = None, # added
         use_latent_tokens=False,     # added
+        latent_size=64,
     ):
         self._filenames = filenames
         self._n_chunks = n_chunks
-        self._orig_block_size = orig_block_size  # added
-        # total_block_size = original + latent
-        self._total_block_size = orig_block_size + latent_size  # added
+        self._block_size = block_size  # added
         self._seed = seed
         self._shuffle = shuffle
         self._wrap = wrap
         self._num_processes = num_processes
         self._process_rank = process_rank
+        self.latent_insert_interval = latent_insert_interval
+        self.latent_size = latent_size
 
         # latent token support
         self.use_latent_tokens = use_latent_tokens  # added
@@ -80,13 +82,13 @@ class PackedDataset(IterableDataset):
         return PackedDatasetIterator(
             filenames=filenames,
             n_chunks=self._n_chunks,
-            orig_block_size=self._orig_block_size,        # added
-            total_block_size=self._total_block_size,      # added
+            block_size=self._block_size,        # added
             seed=self._seed,
             shuffle=self._shuffle,
             wrap=self._wrap,
             use_latent_tokens=self.use_latent_tokens,     # added
             latent_token_tensor=self.latent_token_tensor, # added
+            latent_insert_interval = self.latent_insert_interval, # added
         )
 
 
@@ -148,23 +150,23 @@ class PackedDatasetIterator:
         self,
         filenames,
         n_chunks,
-        orig_block_size,
-        total_block_size,
+        block_size,
         seed,
         shuffle,
         wrap,
         use_latent_tokens=False,     # added
         latent_token_tensor=None,    # added
+        latent_insert_interval: Optional[int] = None, # added
     ):
         self._filenames = filenames
         self._n_chunks = n_chunks
-        self._orig_block_size = orig_block_size        # added
-        self._total_block_size = total_block_size      # added
+        self._block_size = block_size        # added
         self._seed = seed
         self._shuffle = shuffle
         self._wrap = wrap
         self.use_latent_tokens = use_latent_tokens     # added
         self.latent_token_tensor = latent_token_tensor # added
+        self.latent_insert_interval=latent_insert_interval
 
         self._rng = np.random.default_rng(seed) if shuffle else None
         self._file_idx = 0
@@ -175,6 +177,7 @@ class PackedDatasetIterator:
         self._buffers = []
         self._block_idxs = []
         self._curr_idx = 0
+        self._block_counter = 0 #added
 
         self._load_n_chunks()
 
@@ -204,7 +207,7 @@ class PackedDatasetIterator:
             path = self._filenames[self._file_idx + i]
             if self._dtype is None:
                 self._dtype, self._chunk_size = self._read_header(path)
-                self._n_blocks = self._chunk_size // self._orig_block_size
+                self._n_blocks = self._chunk_size // self._block_size
             mp = np.memmap(path, mode="r", offset=HDR_SIZE, dtype=self._dtype, shape=(self._chunk_size,))
             self._mmaps.append(mp)
             self._buffers.append(mp)
@@ -214,6 +217,7 @@ class PackedDatasetIterator:
         indices = self._rng.permutation(total_blocks) if self._shuffle else np.arange(total_blocks)
         self._block_idxs = indices
         self._curr_idx = 0
+        self._block_counter = 0 #added
 
     def __iter__(self):
         return self
@@ -221,22 +225,29 @@ class PackedDatasetIterator:
     def __next__(self):
         if self._curr_idx >= len(self._block_idxs):
             self._load_n_chunks()
+
         block_idx = int(self._block_idxs[self._curr_idx])
         chunk_id = block_idx // self._n_blocks
-        elem_id = (block_idx % self._n_blocks) * self._orig_block_size
+        elem_id = (block_idx % self._n_blocks) * self._block_size
         offset = np.dtype(self._dtype).itemsize * elem_id
         buf = self._buffers[chunk_id]
-        arr = np.frombuffer(buf, dtype=self._dtype, count=self._orig_block_size, offset=offset)
+        arr = np.frombuffer(buf, dtype=self._dtype, count=self._block_size, offset=offset)
         self._curr_idx += 1
 
         block_tensor = torch.from_numpy(arr.astype(np.int64))
-        if self.use_latent_tokens and self.latent_token_tensor is not None:  # added
-            out = torch.cat([self.latent_token_tensor, block_tensor], dim=0)  # added
-            assert out.size(0) == self._total_block_size, (               # added
-                f"Expected length {self._total_block_size}, got {out.size(0)}"
-            )                                                              # added
-            return out                                                     # added
-        return block_tensor
+        
+        #added
+        if not self.use_latent_tokens or self.latent_token_tensor is None or self.latent_insert_interval is None:
+            return block_tensor
+        
+        self._block_counter += 1
+        insert = ((self._block_counter - 1) % self.latent_insert_interval) == 0
+        if insert:
+            return torch.cat([self.latent_token_tensor, block_tensor], dim=0)
+        else:
+            dummy = torch.zeros_like(self.latent_token_tensor)
+            return torch.cat([dummy, block_tensor], dim=0)
+                    
 
     def __del__(self):
         self._close_mmaps()

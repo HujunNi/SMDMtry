@@ -39,7 +39,7 @@ class TransEncoder(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.padded_vocab_size, bias=False)
         self.transformer = nn.ModuleDict(
             dict(
-                wte=nn.Embedding(config.padded_vocab_size + 1, config.n_embd),
+                wte=nn.Embedding(config.padded_vocab_size+1, config.n_embd),
                 h=nn.ModuleList(Block(config) for _ in range(config.n_layer)),
                 ln_f=config.norm_class(config.n_embd, eps=config.norm_eps),
             )
@@ -87,7 +87,7 @@ class TransEncoder(nn.Module):
 
         # >>>> MODIFIED: build block-wise attention mask
         attn_mask = None
-        if self.config.attention_type == "block":
+        if self.config.use_latent:
             def mask_mod(b: int, h: int, q_idx: int, kv_idx: int) -> bool:
                 group = self.config.block_size + self.config.latent_size
                 return (kv_idx // group) <= (q_idx // group)

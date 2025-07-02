@@ -23,8 +23,7 @@ class Config:
     parallel_residual: bool = True
     bias: bool = True
     latent_size: int = 64 # added latent size
-    block_size: int = 512  # added block size
-    attention_type: str = "block"  # added for new mask
+    latent_insert_interval: int = 512  # block interval size 
     # to use multi-head attention (MHA), set this to `n_head` (default)
     # to use multi-query attention (MQA), set this to 1
     # to use grouped-query attention (GQA), set this to a value in between
